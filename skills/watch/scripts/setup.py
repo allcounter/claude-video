@@ -153,6 +153,10 @@ def _status(detailed=False):
     except ConfigError:
         engine = 'gemini'  # Explicitly chosen but the key is missing; gemini_key_present reports it.
     binaries_required = engine == 'local'
+    try:
+        youtube_engine = resolve_engine(cfg['engine'], gemini_key, youtube=True)
+    except ConfigError:
+        youtube_engine = 'gemini'
     has_key, detected = _have_api_key()
     chosen = cfg['whisper_backend']
     mlx_local = whisper.local_available()
@@ -161,7 +165,7 @@ def _status(detailed=False):
     backend_ready = local_ready if chosen == 'whisperx' else (bool(load_api_key(backend)[1]) if backend in ('groq', 'openai') else (backend == 'mlx-local' or chosen == 'none'))
     blocked = bool(missing) and binaries_required
     result = {'status': 'needs_install' if blocked else 'ready', 'can_proceed': not blocked,
-              'engine': engine, 'configured_engine': cfg['engine'], 'gemini_key_present': gemini_key,
+              'engine': engine, 'youtube_engine': youtube_engine, 'configured_engine': cfg['engine'], 'gemini_key_present': gemini_key,
               'gemini_model': cfg['gemini_model'], 'binaries_required': binaries_required,
               'first_run': is_first_run(), 'setup_complete': not is_first_run(),
               'missing_binaries': missing, 'whisper_backend': backend, 'configured_backend': chosen,

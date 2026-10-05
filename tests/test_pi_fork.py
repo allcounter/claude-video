@@ -1,4 +1,4 @@
-"""Pi fork behaviour: mlx-whisper first in auto, and Gemini only when chosen explicitly."""
+"""Pi fork behaviour: mlx-whisper first in auto, and Gemini by default for YouTube URLs only."""
 from __future__ import annotations
 
 import sys
@@ -125,24 +125,25 @@ def test_watch_no_whisper_skips_mlx(monkeypatch):
     assert watch.main() == 0
 
 
-# --- engine default: local -------------------------------------------------
+# --- engine default: auto = Gemini for YouTube URLs only --------------------
 
-def test_engine_default_is_local_even_with_gemini_key(monkeypatch):
+def test_engine_default_is_auto_and_local_for_non_youtube(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "unit-key")
-    assert config.get_config()["engine"] == "local"
+    assert config.get_config()["engine"] == "auto"
     assert config.resolve_engine("auto", has_key=True) == "local"
+    assert config.resolve_engine("auto", has_key=True, youtube=True) == "gemini"
     assert config.resolve_engine("local", has_key=True) == "local"
     assert config.resolve_engine("gemini", has_key=True) == "gemini"
 
 
 @pytest.mark.parametrize("engine_env", [None, "auto", "local"])
-def test_gemini_key_alone_never_contacts_google(monkeypatch, static_clip, capsys, engine_env):
+def test_local_file_never_contacts_google_without_explicit_gemini(monkeypatch, static_clip, capsys, engine_env):
     import gemini
     monkeypatch.setenv("GEMINI_API_KEY", "unit-key")
     if engine_env:
         monkeypatch.setenv("WATCH_ENGINE", engine_env)
     for name in ("ask", "upload_file"):
-        monkeypatch.setattr(gemini, name, lambda *a, **kw: pytest.fail("Gemini must be chosen explicitly"))
+        monkeypatch.setattr(gemini, name, lambda *a, **kw: pytest.fail("a local file must never reach Gemini under auto or local"))
     monkeypatch.setattr(sys, "argv", ["watch", str(static_clip), "--no-whisper"])
     assert watch.main() == 0
     assert "## Frames" in capsys.readouterr().out
@@ -171,3 +172,69 @@ def test_setup_status_reports_mlx_local_in_auto(monkeypatch):
     assert status["whisper_backend"] == "mlx-local" and status["backend_ready"] is True
     assert status["mlx_local_available"] is True
     assert status["engine"] == "local"
+
+
+@pytest.mark.parametrize("engine_env", [None, "auto"])
+@pytest.mark.parametrize("url", ["https://www.youtube.com/watch?v=abc123", "https://youtu.be/abc123"])
+def test_youtube_url_goes_to_gemini_by_default(monkeypatch, capsys, engine_env, url):
+    import gemini
+    monkeypatch.setenv("GEMINI_API_KEY", "unit-key")
+    if engine_env:
+        monkeypatch.setenv("WATCH_ENGINE", engine_env)
+    seen = {}
+    def ask(video, q, **kw):
+        seen["video"] = video
+        return {"text": "ok", "model": kw["model"], "processing": "agentic", "total_tokens": 1}
+    monkeypatch.setattr(gemini, "ask", ask)
+    monkeypatch.setattr(gemini, "upload_file", lambda *a, **kw: pytest.fail("a YouTube URL is never uploaded"))
+    monkeypatch.setattr(sys, "argv", ["watch", url, "--question", "what is shown"])
+    assert watch.main() == 0
+    assert seen["video"] == {"uri": url}
+    assert "## Answer (from Gemini)" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("argv_extra", [["--engine", "local"], ["--detail", "transcript"], ["--no-whisper"], ["--timestamps", "0:01"]])
+def test_youtube_url_stays_local_when_asked(monkeypatch, argv_extra):
+    import gemini
+    monkeypatch.setenv("GEMINI_API_KEY", "unit-key")
+    for name in ("ask", "upload_file"):
+        monkeypatch.setattr(gemini, name, lambda *a, **kw: pytest.fail("local was asked for"))
+    monkeypatch.setattr(watch, "resolve_engine", _spy_engine := (lambda *a, **kw: _record(a, kw)))
+    monkeypatch.setattr(sys, "argv", ["watch", "https://youtu.be/abc123", *argv_extra])
+    with pytest.raises(_Stop):
+        watch.main()
+    assert _LAST["engine"] == "local"
+
+
+def test_youtube_url_without_key_stays_local(monkeypatch):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setattr(config, "load_gemini_key", lambda: None)
+    monkeypatch.setattr(watch, "load_gemini_key", lambda: None)
+    monkeypatch.setattr(watch, "resolve_engine", lambda *a, **kw: _record(a, kw))
+    monkeypatch.setattr(sys, "argv", ["watch", "https://youtu.be/abc123"])
+    with pytest.raises(_Stop):
+        watch.main()
+    assert _LAST["engine"] == "local"
+
+
+@pytest.mark.parametrize("url", ["https://x.com/a/status/1", "https://vimeo.com/123", "https://example.com/v.mp4"])
+def test_other_urls_stay_local_under_auto(monkeypatch, url):
+    monkeypatch.setenv("GEMINI_API_KEY", "unit-key")
+    monkeypatch.setattr(watch, "resolve_engine", lambda *a, **kw: _record(a, kw))
+    monkeypatch.setattr(sys, "argv", ["watch", url])
+    with pytest.raises(_Stop):
+        watch.main()
+    assert _LAST["engine"] == "local"
+
+
+class _Stop(Exception):
+    pass
+
+
+_LAST = {}
+
+
+def _record(a, kw):
+    """Run the real resolver, remember its verdict, and stop before any media work."""
+    _LAST["engine"] = config.resolve_engine(*a, **kw)
+    raise _Stop()

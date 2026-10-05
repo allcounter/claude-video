@@ -14,7 +14,7 @@ DEFAULT_DETAIL = 'balanced'
 DETAILS = {'transcript', 'efficient', 'balanced', 'token-burner'}
 BACKENDS = {'auto', 'groq', 'openai', 'whisperx', 'none'}
 ENGINES = {'auto', 'gemini', 'local'}
-DEFAULT_ENGINE = 'local'  # Pi fork; upstream default is 'auto' (Gemini when a key exists).
+DEFAULT_ENGINE = 'auto'  # Pi fork: auto means Gemini for YouTube URLs only (see resolve_engine).
 DEFAULT_GEMINI_MODEL = 'gemini-3.7-flash'
 
 
@@ -121,19 +121,23 @@ def load_gemini_key() -> str | None:
     return value or None
 
 
-def resolve_engine(choice: str, has_key: bool) -> str:
-    """Pi fork: Gemini only on an explicit `gemini` choice.
+def resolve_engine(choice: str, has_key: bool, *, youtube: bool = False, local_flags: bool = False) -> str:
+    """Pi fork: `auto` picks Gemini for YouTube URLs only.
 
     Upstream resolves `auto` to Gemini whenever a key exists, which would upload
-    local recordings to Google and spend API quota without being asked. Here
-    `auto` is kept as an accepted value for compatibility but always means local.
+    local recordings to Google. Here `auto` means: a YouTube URL goes to Gemini
+    (the URL is handed to Google, nothing is uploaded) when a key exists and the
+    caller passed no local-only flag; every local file and every other URL stays
+    on this machine. An explicit `gemini` or `local` always wins.
     """
     if choice not in ENGINES:
         raise ConfigError('WATCH_ENGINE must be auto, gemini, or local.')
     if choice == 'gemini' and not has_key:
         raise ConfigError('The gemini engine needs GEMINI_API_KEY in the environment or '
                           f'{CONFIG_FILE}. Add it, or rerun with --engine local.')
-    return 'gemini' if choice == 'gemini' else 'local'
+    if choice == 'auto':
+        return 'gemini' if (has_key and youtube and not local_flags) else 'local'
+    return choice
 
 
 def get_config(*, backend_override: str | None = None) -> dict:

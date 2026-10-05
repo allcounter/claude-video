@@ -141,8 +141,9 @@ def main() -> int:
     cookies.add_argument("--cookies-from-browser", default=None, help="Explicit yt-dlp browser selector")
     ap.add_argument("--engine", choices=["auto", "gemini", "local"], default=None,
                     help="gemini: Google watches the video and answers (needs GEMINI_API_KEY). "
-                         "local: frames + transcript on this machine. Default local; auto is accepted "
-                         "and also means local in this fork. Gemini runs only when chosen explicitly.")
+                         "local: frames + transcript on this machine. Default auto: a YouTube URL goes "
+                         "to Gemini when a key exists and no local-only flag is given; local files and "
+                         "all other URLs stay local.")
     ap.add_argument("--question", default=None,
                     help="The user's question. Sent to Gemini on a gemini run; unused by the local engine.")
     args = ap.parse_args()
@@ -163,7 +164,9 @@ def main() -> int:
     auth = {"cookies_file": cookies_file, "cookies_from_browser": cookies_browser}
 
     gemini_key = load_gemini_key()
-    if resolve_engine(args.engine or config["engine"], bool(gemini_key)) == "gemini":
+    local_flags = any(getattr(args, name) is not None for _, name in LOCAL_ONLY_FLAGS) or args.no_whisper or args.no_dedup
+    if resolve_engine(args.engine or config["engine"], bool(gemini_key),
+                      youtube=gemini.is_youtube(args.source), local_flags=local_flags) == "gemini":
         return run_gemini(args, config, gemini_key, start_sec, end_sec, auth)
 
     parent = Path(args.out_dir).expanduser().resolve() if args.out_dir else None
