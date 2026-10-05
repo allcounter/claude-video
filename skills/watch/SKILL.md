@@ -1,6 +1,6 @@
 ---
 name: watch
-description: Watch a video (URL or local path). Downloads with yt-dlp, extracts auto-scaled frames with ffmpeg, pulls the transcript from captions (or local WhisperX / cloud Whisper fallback), and hands the result to the agent so it can answer questions about what's in the video. Pi fork: local engine by default, on-device mlx-whisper first; Google's Gemini video model runs only when asked for explicitly.
+description: Watch a video (URL or local path). Downloads with yt-dlp, extracts auto-scaled frames with ffmpeg, pulls the transcript from captions (or local WhisperX / cloud Whisper fallback), and hands the result to the agent so it can answer questions about what's in the video. Pi fork: a YouTube URL goes to Google's Gemini video model by default when a key exists (pass the question with --question); local files and all other URLs stay on this machine, with on-device mlx-whisper first.
 license: MIT
 allowed-tools: Bash, Read, AskUserQuestion
 metadata:
