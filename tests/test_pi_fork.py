@@ -250,3 +250,80 @@ def test_watch_only_gemini_key_wins_over_shared_key(monkeypatch, tmp_path):
     assert config.load_gemini_key() == "free-from-file"
     monkeypatch.setenv("WATCH_GEMINI_API_KEY", "free-from-env")
     assert config.load_gemini_key() == "free-from-env"
+
+
+def _fallback_env(monkeypatch, tmp_path, free="free-key", paid="paid-key"):
+    cfg = tmp_path / ".env"; cfg.write_text(""); cfg.chmod(0o600)
+    monkeypatch.setattr(config, "CONFIG_FILE", cfg)
+    if free: monkeypatch.setenv("WATCH_GEMINI_API_KEY", free)
+    if paid: monkeypatch.setenv("GEMINI_API_KEY", paid)
+
+
+def test_fallback_key_only_when_a_distinct_watch_key_is_in_use(monkeypatch, tmp_path):
+    _fallback_env(monkeypatch, tmp_path)
+    assert config.load_gemini_key() == "free-key"
+    assert config.load_gemini_fallback_key() == "paid-key"
+    monkeypatch.setenv("WATCH_GEMINI_PAID_FALLBACK", "0")
+    assert config.load_gemini_fallback_key() is None
+    monkeypatch.delenv("WATCH_GEMINI_PAID_FALLBACK")
+    monkeypatch.setenv("GEMINI_API_KEY", "free-key")
+    assert config.load_gemini_fallback_key() is None
+    monkeypatch.delenv("WATCH_GEMINI_API_KEY")
+    monkeypatch.setenv("GEMINI_API_KEY", "paid-key")
+    assert config.load_gemini_fallback_key() is None
+
+
+@pytest.mark.parametrize("reason", ["quota", "service", "network"])
+def test_youtube_question_retries_on_paid_key(monkeypatch, tmp_path, capsys, reason):
+    import gemini
+    _fallback_env(monkeypatch, tmp_path)
+    calls = []
+    def ask(video, q, **kw):
+        calls.append((kw["key"], kw["timeout"]))
+        if kw["key"] == "free-key":
+            raise SystemExit(f"Gemini {reason}: boom. Detail: x")
+        return {"text": "ok", "model": kw["model"], "processing": "agentic", "total_tokens": 1}
+    monkeypatch.setattr(gemini, "ask", ask)
+    monkeypatch.setattr(sys, "argv", ["watch", "https://youtu.be/abc123", "--question", "q"])
+    assert watch.main() == 0
+    assert [k for k, _ in calls] == ["free-key", "paid-key"]
+    assert calls[0][1] <= 150.0 and calls[1][1] == 600.0
+    out = capsys.readouterr().out
+    assert f"- **Key:** paid fallback (free-tier key: Gemini {reason})" in out and "## Answer (from Gemini)" in out
+
+
+@pytest.mark.parametrize("reason", ["auth", "rejected", "response"])
+def test_other_failures_do_not_spend_the_paid_key(monkeypatch, tmp_path, capsys, reason):
+    import gemini
+    _fallback_env(monkeypatch, tmp_path)
+    calls = []
+    def ask(video, q, **kw):
+        calls.append(kw["key"]); raise SystemExit(f"Gemini {reason}: boom. Detail: x")
+    monkeypatch.setattr(gemini, "ask", ask)
+    monkeypatch.setattr(sys, "argv", ["watch", "https://youtu.be/abc123"])
+    assert watch.main() == 1
+    assert calls == ["free-key"]
+    assert "paid fallback" not in capsys.readouterr().out
+
+
+def test_both_keys_failing_reports_the_paid_error(monkeypatch, tmp_path, capsys):
+    import gemini
+    _fallback_env(monkeypatch, tmp_path)
+    monkeypatch.setattr(gemini, "ask", lambda v, q, **kw: (_ for _ in ()).throw(SystemExit(f"Gemini service: down for {kw['key']}")))
+    monkeypatch.setattr(sys, "argv", ["watch", "https://youtu.be/abc123"])
+    assert watch.main() == 1
+    out = capsys.readouterr().out
+    assert "down for paid-key" in out and "- **Key:** paid fallback" in out
+
+
+def test_no_fallback_when_switched_off_or_single_key(monkeypatch, tmp_path):
+    import gemini
+    _fallback_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("WATCH_GEMINI_PAID_FALLBACK", "0")
+    calls = []
+    def ask(video, q, **kw):
+        calls.append((kw["key"], kw["timeout"])); raise SystemExit("Gemini quota: x")
+    monkeypatch.setattr(gemini, "ask", ask)
+    monkeypatch.setattr(sys, "argv", ["watch", "https://youtu.be/abc123"])
+    assert watch.main() == 1
+    assert calls == [("free-key", 600.0)]

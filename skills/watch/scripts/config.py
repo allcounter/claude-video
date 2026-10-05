@@ -131,6 +131,23 @@ def load_gemini_key() -> str | None:
     return value or None
 
 
+def load_gemini_fallback_key() -> str | None:
+    """Pi fork: the shared (paid) GEMINI_API_KEY, only when a different watch-only key is in use.
+
+    Used to retry a YouTube question when the free-tier key is rate-limited, overloaded
+    or times out. Set WATCH_GEMINI_PAID_FALLBACK=0 to switch the retry off.
+    """
+    file_values = read_env_file(CONFIG_FILE)
+    if os.environ.get('WATCH_GEMINI_PAID_FALLBACK', file_values.get('WATCH_GEMINI_PAID_FALLBACK', '1')).strip() == '0':
+        return None
+    primary = (os.environ.get('WATCH_GEMINI_API_KEY', '').strip()
+               or file_values.get('WATCH_GEMINI_API_KEY', '').strip())
+    if not primary:
+        return None
+    shared = os.environ.get('GEMINI_API_KEY', '').strip() or file_values.get('GEMINI_API_KEY', '').strip()
+    return shared if shared and shared != primary else None
+
+
 def resolve_engine(choice: str, has_key: bool, *, youtube: bool = False, local_flags: bool = False) -> str:
     """Pi fork: `auto` picks Gemini for YouTube URLs only.
 

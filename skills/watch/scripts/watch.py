@@ -17,7 +17,7 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).parent.resolve()
 sys.path.insert(0, str(SCRIPT_DIR))
 
-from config import ConfigError, frame_cap, get_config, load_gemini_key, resolve_engine  # noqa: E402
+from config import ConfigError, frame_cap, get_config, load_gemini_fallback_key, load_gemini_key, resolve_engine  # noqa: E402
 import gemini  # noqa: E402
 from download import download, fetch_captions, is_url, auth_args  # noqa: E402
 from frames import MAX_FPS, auto_fps, auto_fps_focus, extract_at_timestamps, extract_keyframes, extract_scene_or_uniform, format_time, get_metadata, merge_frames, parse_time, parse_timestamps, validate_controls  # noqa: E402
@@ -36,6 +36,12 @@ def run_gemini(args, config, key, start_sec, end_sec, auth) -> int:
     ignored += [flag for flag, on in (("--no-whisper", args.no_whisper), ("--no-dedup", args.no_dedup)) if on]
     clip = (start_sec, end_sec) if start_sec is not None or end_sec is not None else None
     uploaded, warning, result, error, sent, work = None, None, None, None, "URL sent to Google", None
+    key_note = None
+    # Pi fork: a YouTube question that the free-tier key cannot serve (quota, overload,
+    # timeout) is retried once on the shared paid key. Uploads never fall back: an uploaded
+    # file belongs to the project of the key that uploaded it.
+    fallback_key = load_gemini_fallback_key() if gemini.is_youtube(args.source) else None
+    first_timeout = min(config["gemini_timeout"], 150.0) if fallback_key else config["gemini_timeout"]
     try:
         if gemini.is_youtube(args.source):
             video = {"uri": args.source}
@@ -53,8 +59,17 @@ def run_gemini(args, config, key, start_sec, end_sec, auth) -> int:
             video = {"uri": uploaded["uri"], "mime_type": uploaded["mime_type"]}
             sent = "video uploaded to Google, deleted after the answer"
         print(f"[watch] asking {config['gemini_model']}…", file=sys.stderr)
-        result = gemini.ask(video, args.question, model=config["gemini_model"], key=key,
-                            clip=clip, timeout=config["gemini_timeout"])
+        try:
+            result = gemini.ask(video, args.question, model=config["gemini_model"], key=key,
+                                clip=clip, timeout=first_timeout)
+        except SystemExit as exc:
+            reason = str(exc).split(":", 1)[0]
+            if not fallback_key or reason not in ("Gemini quota", "Gemini service", "Gemini network"):
+                raise
+            print(f"[watch] free-tier key unavailable ({reason}); retrying on the paid key…", file=sys.stderr)
+            key_note = f"paid fallback (free-tier key: {reason})"
+            result = gemini.ask(video, args.question, model=config["gemini_model"], key=fallback_key,
+                                clip=clip, timeout=config["gemini_timeout"])
     except SystemExit as exc:
         error = str(exc)
     finally:
@@ -68,6 +83,8 @@ def run_gemini(args, config, key, start_sec, end_sec, auth) -> int:
     print()
     print(f"- **Source:** {args.source} ({sent})")
     print(f"- **Engine:** {config['gemini_model']} ({result['processing'] if result else 'failed'})")
+    if key_note:
+        print(f"- **Key:** {key_note}")
     if clip:
         print(f"- **Focus range:** {format_time(start_sec or 0)} → {format_time(end_sec) if end_sec is not None else 'end'}")
     if ignored:
