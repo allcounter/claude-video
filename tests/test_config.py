@@ -76,19 +76,21 @@ def test_user_file_beats_project_file(monkeypatch):
     assert config.load_api_key() == ('groq', 'environment-test')
 
 
-def test_engine_defaults_to_auto_and_local_without_key():
+def test_engine_defaults_to_local_without_key():
     cfg = config.get_config()
-    assert cfg['engine'] == 'auto'
+    assert cfg['engine'] == 'local'  # Pi fork; upstream defaults to 'auto'
     assert cfg['gemini_model'] == 'gemini-3.7-flash'
     assert cfg['gemini_timeout'] == 600.0
     assert config.load_gemini_key() is None
     assert config.resolve_engine('auto', has_key=False) == 'local'
 
 
-def test_auto_selects_gemini_when_key_present(monkeypatch):
+def test_auto_stays_local_when_key_present(monkeypatch):
+    # Pi fork: upstream resolves auto+key to gemini; here only an explicit choice does.
     monkeypatch.setenv('GEMINI_API_KEY', 'test-key')
     assert config.load_gemini_key() == 'test-key'
-    assert config.resolve_engine('auto', has_key=True) == 'gemini'
+    assert config.resolve_engine('auto', has_key=True) == 'local'
+    assert config.resolve_engine('gemini', has_key=True) == 'gemini'
     assert config.resolve_engine('local', has_key=True) == 'local'
 
 

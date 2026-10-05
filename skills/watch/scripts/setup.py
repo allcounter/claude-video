@@ -15,6 +15,7 @@ from pathlib import Path
 from config import (CONFIG_DIR, CONFIG_FILE, ConfigError, DETAILS, ENGINES, get_config,
                     load_api_key, load_gemini_key, read_env_file, resolve_engine, write_settings)
 from runtime import configure_stdio, diagnostic, run_text
+import whisper  # Pi fork: mlx-local availability for the status report
 
 REQUIRED_BINARIES = ['ffmpeg', 'ffprobe', 'yt-dlp']
 WHISPERX_VERSION = '3.8.6'
@@ -23,7 +24,8 @@ ENV_TEMPLATE = '''# /watch configuration. No shell interpolation; last assignmen
 # Native captions always come first. Optional fallback: auto|whisperx|groq|openai|none.
 # auto preserves the Groq-then-OpenAI preference for existing installations.
 # The first-run skill wizard sets WATCH_DETAIL and WATCH_WHISPER_BACKEND.
-# WATCH_ENGINE=auto|gemini|local. auto uses Gemini when GEMINI_API_KEY is set.
+# WATCH_ENGINE=auto|gemini|local. Pi fork: default local; auto also means local.
+# Gemini runs only with WATCH_ENGINE=gemini or --engine gemini.
 # With the gemini engine, local videos are uploaded to Google for analysis.
 GEMINI_API_KEY=
 GROQ_API_KEY=
@@ -153,16 +155,17 @@ def _status(detailed=False):
     binaries_required = engine == 'local'
     has_key, detected = _have_api_key()
     chosen = cfg['whisper_backend']
-    backend = detected if chosen == 'auto' else chosen
+    mlx_local = whisper.local_available()
+    backend = ('mlx-local' if mlx_local else detected) if chosen == 'auto' else chosen
     local_ready = _whisperx_status(cfg, detailed)
-    backend_ready = local_ready if chosen == 'whisperx' else (bool(load_api_key(backend)[1]) if backend in ('groq', 'openai') else chosen == 'none')
+    backend_ready = local_ready if chosen == 'whisperx' else (bool(load_api_key(backend)[1]) if backend in ('groq', 'openai') else (backend == 'mlx-local' or chosen == 'none'))
     blocked = bool(missing) and binaries_required
     result = {'status': 'needs_install' if blocked else 'ready', 'can_proceed': not blocked,
               'engine': engine, 'configured_engine': cfg['engine'], 'gemini_key_present': gemini_key,
               'gemini_model': cfg['gemini_model'], 'binaries_required': binaries_required,
               'first_run': is_first_run(), 'setup_complete': not is_first_run(),
               'missing_binaries': missing, 'whisper_backend': backend, 'configured_backend': chosen,
-              'has_api_key': has_key, 'backend_ready': backend_ready,
+              'has_api_key': has_key, 'backend_ready': backend_ready, 'mlx_local_available': mlx_local,
               'whisperx_ready': local_ready, 'whisperx_bin': cfg['whisperx_bin'],
               'whisperx_model': cfg['whisperx_model'], 'config_file': str(CONFIG_FILE),
               'watch_detail': cfg['detail'], 'platform': platform.system()}

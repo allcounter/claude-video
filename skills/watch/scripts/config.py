@@ -14,6 +14,7 @@ DEFAULT_DETAIL = 'balanced'
 DETAILS = {'transcript', 'efficient', 'balanced', 'token-burner'}
 BACKENDS = {'auto', 'groq', 'openai', 'whisperx', 'none'}
 ENGINES = {'auto', 'gemini', 'local'}
+DEFAULT_ENGINE = 'local'  # Pi fork; upstream default is 'auto' (Gemini when a key exists).
 DEFAULT_GEMINI_MODEL = 'gemini-3.7-flash'
 
 
@@ -121,12 +122,18 @@ def load_gemini_key() -> str | None:
 
 
 def resolve_engine(choice: str, has_key: bool) -> str:
+    """Pi fork: Gemini only on an explicit `gemini` choice.
+
+    Upstream resolves `auto` to Gemini whenever a key exists, which would upload
+    local recordings to Google and spend API quota without being asked. Here
+    `auto` is kept as an accepted value for compatibility but always means local.
+    """
     if choice not in ENGINES:
         raise ConfigError('WATCH_ENGINE must be auto, gemini, or local.')
     if choice == 'gemini' and not has_key:
         raise ConfigError('The gemini engine needs GEMINI_API_KEY in the environment or '
                           f'{CONFIG_FILE}. Add it, or rerun with --engine local.')
-    return 'gemini' if choice == 'gemini' or (choice == 'auto' and has_key) else 'local'
+    return 'gemini' if choice == 'gemini' else 'local'
 
 
 def get_config(*, backend_override: str | None = None) -> dict:
@@ -137,7 +144,7 @@ def get_config(*, backend_override: str | None = None) -> dict:
     backend = backend_override if backend_override is not None else setting('WATCH_WHISPER_BACKEND', 'auto')
     if backend not in BACKENDS:
         raise ConfigError('WATCH_WHISPER_BACKEND must be auto, groq, openai, whisperx, or none.')
-    engine = setting('WATCH_ENGINE', 'auto')
+    engine = setting('WATCH_ENGINE', DEFAULT_ENGINE)
     if engine not in ENGINES:
         raise ConfigError('WATCH_ENGINE must be auto, gemini, or local.')
     return {

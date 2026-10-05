@@ -34,6 +34,13 @@ GROQ_MODEL = "whisper-large-v3"
 OPENAI_ENDPOINT = "https://api.openai.com/v1/audio/transcriptions"
 OPENAI_MODEL = "whisper-1"
 
+# Pi fork: on-device mlx-whisper (Apple Silicon). Free, no API key, no network
+# once the model is cached. In `auto` it is tried before any cloud backend; an
+# explicit groq/openai/whisperx choice skips it. Needs the interpreter running
+# watch.py to import mlx_whisper (on this Mac: /usr/bin/python3, not Homebrew's).
+LOCAL_MODEL = "mlx-community/whisper-large-v3-turbo"
+LOCAL_BACKEND = "mlx-local"
+
 # Both Groq's free tier and OpenAI whisper-1 cap uploads at 25 MB. We target a
 # margin under that so multipart framing overhead never pushes a chunk over.
 MAX_UPLOAD_BYTES = 24_000_000
@@ -344,18 +351,68 @@ def _transcribe_file(backend: str, api_key: str, audio_path: Path) -> list[dict]
     return _segments_from_response(response)
 
 
+def local_available() -> bool:
+    """True if mlx-whisper is installed for this interpreter (Pi fork).
+
+    find_spec, not import: importing mlx_whisper costs about a second, which
+    setup.py --check must not pay. A broken install still fails safely, because
+    transcribe_local's real import error falls back to the cloud path.
+    """
+    if "mlx_whisper" in sys.modules:
+        return True
+    try:
+        import importlib.util
+        return importlib.util.find_spec("mlx_whisper") is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def transcribe_local(video_path: str, audio_out: Path) -> list[dict]:
+    """Transcribe on-device via mlx-whisper (Pi fork). No key, no network, no upload.
+
+    mlx-whisper handles long audio natively, so no MAX_UPLOAD_BYTES chunking.
+    Blank segments (common on music or silence) are dropped before
+    normalisation, which rejects empty text. Returns Segments; an empty result
+    means no speech, not a failure.
+    """
+    import mlx_whisper
+    print("[watch] extracting audio for local whisper…", file=sys.stderr)
+    audio_path = extract_audio(video_path, audio_out)
+    print(f"[watch] transcribing locally via mlx-whisper ({LOCAL_MODEL})…", file=sys.stderr)
+    result = mlx_whisper.transcribe(str(audio_path), path_or_hf_repo=LOCAL_MODEL)
+    raw = result.get("segments") if isinstance(result, dict) else None
+    if not isinstance(raw, list):
+        raise SystemExit("mlx-whisper returned no segments array")
+    kept = [s for s in raw if isinstance(s, dict) and isinstance(s.get("text"), str) and s["text"].strip()]
+    return _segments_from_response({"segments": kept})
+
+
 def transcribe_video(
     video_path: str,
     audio_out: Path,
     backend: str | None = None,
     api_key: str | None = None,
+    prefer_local: bool = True,
 ) -> tuple[list[dict], str]:
-    """Run the full flow: extract audio → upload → parse segments.
+    """Run the full flow: extract audio → transcribe → parse segments.
 
+    Pi fork: with no explicit backend, on-device mlx-whisper is tried first.
+    If it is unavailable or raises, the upstream cloud path runs as before. An
+    empty local result is returned as no speech (upstream's Segments.no_speech
+    semantics) rather than re-sent to a paid cloud API.
     Returns (segments, backend_used). Raises SystemExit on any failure.
     """
     if api_key is not None and backend is None:
         raise SystemExit("An API key requires an explicit groq or openai backend.")
+    if prefer_local and backend is None and local_available():
+        try:
+            segments = transcribe_local(video_path, audio_out)
+            if not segments:
+                print("[watch] mlx-whisper detected no speech", file=sys.stderr)
+            print(f"[watch] transcribed {len(segments)} segments via {LOCAL_BACKEND}", file=sys.stderr)
+            return segments, LOCAL_BACKEND
+        except (Exception, SystemExit) as exc:
+            print(f"[watch] local whisper failed ({exc}) — falling back to cloud", file=sys.stderr)
     if backend == "whisperx":
         if api_key is not None:
             raise SystemExit("WhisperX does not accept an API key.")

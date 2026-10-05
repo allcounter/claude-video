@@ -40,6 +40,11 @@ def isolated_user(monkeypatch, tmp_path):
     def no_upload(*args, **kwargs):
         raise AssertionError("Tests must mock cloud uploads")
     monkeypatch.setattr(whisper, "urlopen", no_upload)
+    # Pi fork: never run a real on-device model in tests, even on an interpreter
+    # that has mlx_whisper. Tests that exercise mlx-first opt back in.
+    monkeypatch.setattr(whisper, "local_available", lambda: False)
+    if "watch" in sys.modules:
+        monkeypatch.setattr(sys.modules["watch"], "local_whisper_available", lambda: False)
     import gemini
     def no_gemini(*args, **kwargs):
         raise AssertionError("Tests must mock Gemini calls")

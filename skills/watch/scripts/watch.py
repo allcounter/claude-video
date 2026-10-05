@@ -22,7 +22,7 @@ import gemini  # noqa: E402
 from download import download, fetch_captions, is_url, auth_args  # noqa: E402
 from frames import MAX_FPS, auto_fps, auto_fps_focus, extract_at_timestamps, extract_keyframes, extract_scene_or_uniform, format_time, get_metadata, merge_frames, parse_time, parse_timestamps, validate_controls  # noqa: E402
 from transcribe import filter_range, format_transcript, parse_vtt  # noqa: E402
-from whisper import load_api_key, transcribe_video  # noqa: E402
+from whisper import load_api_key, transcribe_video, local_available as local_whisper_available  # noqa: E402
 from runtime import configure_stdio  # noqa: E402
 
 
@@ -141,7 +141,8 @@ def main() -> int:
     cookies.add_argument("--cookies-from-browser", default=None, help="Explicit yt-dlp browser selector")
     ap.add_argument("--engine", choices=["auto", "gemini", "local"], default=None,
                     help="gemini: Google watches the video and answers (needs GEMINI_API_KEY). "
-                         "local: frames + transcript on this machine. Default auto: gemini when a key exists.")
+                         "local: frames + transcript on this machine. Default local; auto is accepted "
+                         "and also means local in this fork. Gemini runs only when chosen explicitly.")
     ap.add_argument("--question", default=None,
                     help="The user's question. Sent to Gemini on a gemini run; unused by the local engine.")
     args = ap.parse_args()
@@ -266,7 +267,14 @@ def main() -> int:
     transcript_state = "missing"
     if not track_available and backend_choice != "none" and video_path and meta.get("has_audio"):
         backend, api_key = ("whisperx", None) if backend_choice == "whisperx" else load_api_key(None if backend_choice == "auto" else backend_choice)
-        if backend:
+        # Pi fork: in auto, on-device mlx-whisper goes first, key or no key.
+        # transcribe_video(backend=None) tries it and falls back to cloud itself.
+        if backend_choice == "auto" and local_whisper_available():
+            backend, api_key = None, None
+            local_first = True
+        else:
+            local_first = False
+        if backend or local_first:
             try:
                 all_segments, used_backend = transcribe_video(video_path, work / "audio.mp3", backend=backend, api_key=api_key)
                 gaps = getattr(all_segments, "gaps", [])

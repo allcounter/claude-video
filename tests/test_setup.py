@@ -109,9 +109,10 @@ def test_none_backend_completion():
 
 def test_gemini_engine_is_ready_without_media_binaries(monkeypatch):
     monkeypatch.setenv('GEMINI_API_KEY', 'unit-key')
+    monkeypatch.setenv('WATCH_ENGINE', 'gemini')  # Pi fork: Gemini is opt-in, never implied by a key
     monkeypatch.setattr(setup, '_check_binaries', lambda: list(setup.REQUIRED_BINARIES))
     status = setup._status()
-    assert status['engine'] == 'gemini' and status['configured_engine'] == 'auto'
+    assert status['engine'] == 'gemini' and status['configured_engine'] == 'gemini'
     assert status['gemini_key_present'] is True and status['gemini_model'] == 'gemini-3.7-flash'
     assert status['can_proceed'] is True and status['status'] == 'ready'
     assert status['binaries_required'] is False

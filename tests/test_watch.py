@@ -202,6 +202,7 @@ def test_youtube_with_key_uses_gemini_and_touches_nothing_local(monkeypatch, cap
     seen = {}
     _gemini_answer(monkeypatch, seen)
     monkeypatch.setenv('GEMINI_API_KEY', 'unit-key')
+    monkeypatch.setenv('WATCH_ENGINE', 'gemini')  # Pi fork: Gemini is opt-in, never implied by a key
     for name in ('fetch_captions', 'download', 'get_metadata', 'transcribe_video'):
         monkeypatch.setattr(watch, name, lambda *a, _n=name, **kw: pytest.fail(f'{_n} must not run on a Gemini YouTube run'))
     monkeypatch.setattr(sys, 'argv', ['watch', 'https://youtu.be/abc', '--question', 'When does it change?', '--detail', 'efficient'])
@@ -220,6 +221,7 @@ def test_local_file_is_uploaded_asked_then_deleted(monkeypatch, capsys, static_c
     seen, deleted = {}, []
     _gemini_answer(monkeypatch, seen)
     monkeypatch.setenv('GEMINI_API_KEY', 'unit-key')
+    monkeypatch.setenv('WATCH_ENGINE', 'gemini')  # Pi fork: Gemini is opt-in, never implied by a key
     monkeypatch.setattr(gemini, 'upload_file', lambda path, key, **kw: {'name': 'files/abc', 'uri': 'https://g/files/abc', 'mime_type': 'video/mp4'})
     monkeypatch.setattr(gemini, 'delete_file', lambda name, key: deleted.append(name))
     monkeypatch.setattr(sys, 'argv', ['watch', str(static_clip), '--start', '0:20', '--end', '0:30'])
@@ -234,6 +236,7 @@ def test_upload_is_deleted_even_when_the_question_fails(monkeypatch, capsys, sta
     import gemini
     deleted = []
     monkeypatch.setenv('GEMINI_API_KEY', 'unit-key')
+    monkeypatch.setenv('WATCH_ENGINE', 'gemini')  # Pi fork: Gemini is opt-in, never implied by a key
     monkeypatch.setattr(gemini, 'upload_file', lambda path, key, **kw: {'name': 'files/abc', 'uri': 'u', 'mime_type': 'video/mp4'})
     monkeypatch.setattr(gemini, 'delete_file', lambda name, key: deleted.append(name))
     def boom(*a, **kw):
@@ -274,6 +277,7 @@ def test_explicit_gemini_without_key_fails_before_any_work(monkeypatch):
 def test_failed_upload_is_reported_honestly_and_work_dir_removed(monkeypatch, capsys, static_clip, tmp_path):
     import gemini
     monkeypatch.setenv('GEMINI_API_KEY', 'unit-key')
+    monkeypatch.setenv('WATCH_ENGINE', 'gemini')  # Pi fork: Gemini is opt-in, never implied by a key
     def boom(path, key, **kw):
         raise SystemExit('Gemini upload: nope. No local fallback was attempted; rerun with --engine local')
     monkeypatch.setattr(gemini, 'upload_file', boom)
