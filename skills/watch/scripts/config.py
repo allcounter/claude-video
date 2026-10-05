@@ -111,7 +111,17 @@ def load_api_key(preferred: str | None = None) -> tuple[str | None, str | None]:
 
 
 def load_gemini_key() -> str | None:
-    """Environment, then the user config, then a project .env; never logged."""
+    """A watch-only key first, then the shared one; never logged.
+
+    Pi fork: WATCH_GEMINI_API_KEY (environment, then the user config) wins over
+    GEMINI_API_KEY, so watch can run on a free-tier project while other tools keep
+    a paid key in the shell environment.
+    """
+    value = os.environ.get('WATCH_GEMINI_API_KEY', '').strip()
+    if not value:
+        value = read_env_file(CONFIG_FILE).get('WATCH_GEMINI_API_KEY', '').strip()
+    if value:
+        return value
     value = os.environ.get('GEMINI_API_KEY', '').strip()
     if not value:
         for path in (CONFIG_FILE, Path.cwd() / '.env'):

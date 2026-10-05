@@ -238,3 +238,15 @@ def _record(a, kw):
     """Run the real resolver, remember its verdict, and stop before any media work."""
     _LAST["engine"] = config.resolve_engine(*a, **kw)
     raise _Stop()
+
+
+def test_watch_only_gemini_key_wins_over_shared_key(monkeypatch, tmp_path):
+    cfg = tmp_path / ".env"
+    monkeypatch.setattr(config, "CONFIG_FILE", cfg)
+    monkeypatch.setenv("GEMINI_API_KEY", "paid-shared")
+    assert config.load_gemini_key() == "paid-shared"
+    cfg.write_text("WATCH_GEMINI_API_KEY=free-from-file\n")
+    cfg.chmod(0o600)
+    assert config.load_gemini_key() == "free-from-file"
+    monkeypatch.setenv("WATCH_GEMINI_API_KEY", "free-from-env")
+    assert config.load_gemini_key() == "free-from-env"
