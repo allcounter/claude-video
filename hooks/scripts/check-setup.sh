@@ -3,7 +3,8 @@
 set -u
 PLUGIN_DIR="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 SETUP_SCRIPT="$PLUGIN_DIR/skills/watch/scripts/setup.py"
-for interpreter in python3 python; do
+# Pi fork: pi-python (Python 3.13, ~/.pi-system/python) is preferred; upstream order after it.
+for interpreter in pi-python python3 python; do
   if command -v "$interpreter" >/dev/null 2>&1 && "$interpreter" -c 'import sys; sys.exit(sys.version_info < (3, 10))' >/dev/null 2>&1; then
     if "$interpreter" "$SETUP_SCRIPT" --check >/dev/null 2>&1; then
       exit 0
